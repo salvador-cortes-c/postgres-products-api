@@ -22,7 +22,7 @@ The easiest way to get started is with Docker Compose, which automatically sets 
 
 ```bash
 # Start both the API and PostgreSQL database
-docker-compose up -d
+docker compose up -d --build
 
 # Initialize the database schema (runs automatically on first start)
 # The schema.sql is applied via docker-entrypoint-initdb.d
@@ -31,7 +31,7 @@ docker-compose up -d
 curl http://localhost:8000/health
 
 # View API documentation
-open http://localhost:8000/docs
+$BROWSER http://localhost:8000/docs
 ```
 
 The API will be available at `http://localhost:8000` and the database at `localhost:5432`.
@@ -199,7 +199,7 @@ See [db/schema.sql](db/schema.sql) for detailed schema definition.
 
 ## Data Flow
 
-1. **Scraper** (from `python-playwright-scraper`) collects product data
+1. **Scraper** from [salvador-cortes-c/python-playwright-scraper](https://github.com/salvador-cortes-c/python-playwright-scraper) collects product data
 2. **Scraper** stores data in PostgreSQL via `--persist-db` flag
 3. **API** reads data from PostgreSQL for frontend consumption
 
@@ -209,14 +209,12 @@ See [db/schema.sql](db/schema.sql) for detailed schema definition.
 
 1. Create a free PostgreSQL database (Supabase, Neon, or cloud provider)
 2. Set `DATABASE_URL` environment variable
-3. Deploy the API (e.g., via Docker):
+3. Deploy the API container with port `8000` exposed:
 
 ```bash
-# Railway example
-railway up
-
-# Or Heroku
-git push heroku main
+# Example container run
+docker build -t postgres-products-api .
+docker run --rm -p 8000:8000 -e DATABASE_URL="$DATABASE_URL" postgres-products-api
 ```
 
 ### Environment Variables
@@ -235,7 +233,7 @@ Uses Python 3.12+ features (e.g., `|` for type unions).
 
 ## Support
 
-For issues related to the scraper or data ingestion, see the [python-playwright-scraper](../python-playwright-scraper) repository.
+For issues related to scraping or ingestion, see [salvador-cortes-c/python-playwright-scraper](https://github.com/salvador-cortes-c/python-playwright-scraper).
 
 ## License
 
