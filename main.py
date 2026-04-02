@@ -1,12 +1,72 @@
 from __future__ import annotations
 
+from datetime import datetime
 import os
 from typing import Any
 
 import psycopg
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from psycopg.rows import dict_row
+
+
+class HealthResponse(BaseModel):
+    status: str
+
+
+class StoreResponse(BaseModel):
+    id: int
+    name: str
+    created_at: datetime
+
+
+class CategoryResponse(BaseModel):
+    id: int
+    name: str
+    url: str
+    source_url: str
+    created_at: datetime
+
+
+class ProductSummaryResponse(BaseModel):
+    product_key: str
+    name: str
+    packaging_format: str
+    image_url: str
+    store_name: str | None = None
+    price_cents: int | None = None
+    unit_price_text: str
+    promo_price_cents: int | None = None
+    promo_unit_price_text: str
+    scraped_at: datetime
+
+
+class ProductLatestPriceResponse(BaseModel):
+    product_key: str
+    name: str
+    packaging_format: str
+    image_url: str
+    store_name: str | None = None
+    price_cents: int | None = None
+    unit_price_text: str
+    promo_price_cents: int | None = None
+    promo_unit_price_text: str
+    source_url: str
+    scraped_at: datetime
+
+
+class PriceHistoryEntryResponse(BaseModel):
+    id: int
+    product_key: str
+    store_name: str | None = None
+    price_cents: int | None = None
+    unit_price_text: str
+    promo_price_cents: int | None = None
+    promo_unit_price_text: str
+    source_url: str
+    scraped_at: datetime
+    provider: str
 
 
 def _database_url() -> str:
@@ -43,29 +103,31 @@ app.add_middleware(
 )
 
 
-@app.get("/health")
-def health() -> dict[str, str]:
+@app.get("/health", response_model=HealthResponse)
+def health() -> HealthResponse:
     _ = _database_url()
-    return {"status": "ok"}
+    return HealthResponse(status="ok")
 
 
-@app.get("/stores")
-def stores() -> list[dict[str, Any]]:
-    return _fetch_all("SELECT id, name, created_at FROM stores ORDER BY name ASC")
+@app.get("/stores", response_model=list[StoreResponse])
+def stores() -> list[StoreResponse]:
+    rows = _fetch_all("SELECT id, name, created_at FROM stores ORDER BY name ASC")
+    return [StoreResponse.model_validate(row) for row in rows]
 
 
-@app.get("/categories")
-def categories() -> list[dict[str, Any]]:
-    return _fetch_all("SELECT id, name, url, source_url, created_at FROM categories ORDER BY name ASC")
+@app.get("/categories", response_model=list[CategoryResponse])
+def categories() -> list[CategoryResponse]:
+    rows = _fetch_all("SELECT id, name, url, source_url, created_at FROM categories ORDER BY name ASC")
+    return [CategoryResponse.model_validate(row) for row in rows]
 
 
-@app.get("/products")
+@app.get("/products", response_model=list[ProductSummaryResponse])
 def products(
     q: str | None = None,
     store: str | None = None,
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
-) -> list[dict[str, Any]]:
+) -> list[ProductSummaryResponse]:
     filters: list[str] = []
     params: list[Any] = []
 
@@ -100,11 +162,12 @@ def products(
         LIMIT %s OFFSET %s;
     """
     params.extend([limit, offset])
-    return _fetch_all(query, tuple(params))
+    rows = _fetch_all(query, tuple(params))
+    return [ProductSummaryResponse.model_validate(row) for row in rows]
 
 
-@app.get("/products/{product_key}/latest")
-def latest_price(product_key: str, store: str | None = None) -> dict[str, Any]:
+@app.get("/products/{product_key}/latest", response_model=ProductLatestPriceResponse)
+def latest_price(product_key: str, store: str | None = None) -> ProductLatestPriceResponse:
     if store:
         row = _fetch_one(
             """
@@ -156,17 +219,17 @@ def latest_price(product_key: str, store: str | None = None) -> dict[str, Any]:
 
     if row is None:
         raise HTTPException(status_code=404, detail="Product snapshot not found")
-    return row
+    return ProductLatestPriceResponse.model_validate(row)
 
 
-@app.get("/products/{product_key}/history")
+@app.get("/products/{product_key}/history", response_model=list[PriceHistoryEntryResponse])
 def price_history(
     product_key: str,
     store: str | None = None,
     limit: int = Query(default=365, ge=1, le=5000),
-) -> list[dict[str, Any]]:
+) -> list[PriceHistoryEntryResponse]:
     if store:
-        return _fetch_all(
+        rows = _fetch_all(
             """
             SELECT
                 ps.id,
@@ -187,8 +250,9 @@ def price_history(
             """,
             (product_key, store, limit),
         )
+        return [PriceHistoryEntryResponse.model_validate(row) for row in rows]
 
-    return _fetch_all(
+    rows = _fetch_all(
         """
         SELECT
             ps.id,
@@ -209,3 +273,4 @@ def price_history(
         """,
         (product_key, limit),
     )
+    return [PriceHistoryEntryResponse.model_validate(row) for row in rows]

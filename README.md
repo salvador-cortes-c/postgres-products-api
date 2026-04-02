@@ -2,6 +2,8 @@
 
 A FastAPI service for read-only access to product pricing data from the New World Scraper. The API provides REST endpoints to query products, stores, categories, and historical price snapshots from a PostgreSQL database.
 
+The API uses explicit Pydantic response models, so endpoint responses are typed, validated, and reflected accurately in the generated OpenAPI schema.
+
 ## Features
 
 - **Product Search** - Query products by name with store filtering
