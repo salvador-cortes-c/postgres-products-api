@@ -189,3 +189,33 @@ def test_stores_and_categories_read_from_database(monkeypatch, integration_datab
     assert [item["name"] for item in stores_response.json()] == ["New World Karori", "New World Metro"]
     assert categories_response.status_code == 200
     assert [item["name"] for item in categories_response.json()] == ["Bread", "Milk"]
+
+
+def test_category_products_endpoint_reads_real_database(monkeypatch, integration_database_url: str) -> None:
+    monkeypatch.setenv("DATABASE_URL", integration_database_url)
+    seed_database(integration_database_url)
+    client = TestClient(main.app)
+
+    response = client.get("/categories/1/products", params={"store": "New World Karori"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["category"]["name"] == "Milk"
+    assert len(payload["products"]) == 1
+    assert payload["products"][0]["product_key"] == "milk-1l"
+    assert payload["products"][0]["price_cents"] == 379
+
+
+def test_api_key_protects_real_endpoint(monkeypatch, integration_database_url: str) -> None:
+    monkeypatch.setenv("DATABASE_URL", integration_database_url)
+    monkeypatch.setenv("API_KEY", "integration-secret")
+    seed_database(integration_database_url)
+    client = TestClient(main.app)
+
+    unauthorized_response = client.get("/products")
+    authorized_response = client.get("/products", headers={"X-API-Key": "integration-secret"})
+
+    assert unauthorized_response.status_code == 401
+    assert unauthorized_response.json() == {"detail": "Invalid or missing API key"}
+    assert authorized_response.status_code == 200
+    assert len(authorized_response.json()) == 2

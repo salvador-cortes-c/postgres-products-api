@@ -7,10 +7,11 @@ The API uses explicit Pydantic response models, so endpoint responses are typed,
 ## Features
 
 - **Product Search** - Query products by name with store filtering
+- **Category Browsing** - Fetch a category and its latest products in one call
 - **Price History** - Track price changes over time
-- **Category Browsing** - Browse all product categories
 - **Store Information** - List all stores
 - **Health Check** - Verify API and database connectivity
+- **API Key Protection** - Optional header-based auth for public deployments
 
 ## Prerequisites
 
@@ -85,6 +86,12 @@ export DATABASE_URL="postgresql://localhost/products_db"
 export DATABASE_URL="postgresql://user:password@host:5432/database_name"
 ```
 
+Optional: protect all read endpoints except `/health` with an API key:
+
+```bash
+export API_KEY="replace-with-a-long-random-secret"
+```
+
 ### 5. Run the API
 
 ```bash
@@ -121,6 +128,20 @@ GET /categories
 ```
 
 Returns all product categories sorted by name.
+
+### Category Products
+
+```bash
+GET /categories/{category_id}/products?q=search_term&store=store_name&limit=100&offset=0
+```
+
+Returns the requested category plus the latest snapshot per product within that category.
+
+Example:
+```bash
+curl "http://localhost:8000/categories/1/products"
+curl "http://localhost:8000/categories/1/products?store=New%20World%20Karori"
+```
 
 ### Products Search
 
@@ -222,6 +243,17 @@ docker run --rm -p 8000:8000 -e DATABASE_URL="$DATABASE_URL" postgres-products-a
 ### Environment Variables
 
 - `DATABASE_URL` - PostgreSQL connection string (required)
+- `API_KEY` - optional shared secret for `X-API-Key` protection on all read endpoints except `/health`
+
+### Authentication
+
+When `API_KEY` is set, requests to `/stores`, `/categories`, `/categories/{category_id}/products`, `/products`, `/products/{product_key}/latest`, and `/products/{product_key}/history` must include:
+
+```bash
+curl -H "X-API-Key: $API_KEY" "http://localhost:8000/products?limit=5"
+```
+
+If `API_KEY` is not set, the API stays open for local development.
 
 ## Development
 
