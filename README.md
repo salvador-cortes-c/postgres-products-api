@@ -225,7 +225,15 @@ docker run --rm -p 8000:8000 -e DATABASE_URL="$DATABASE_URL" postgres-products-a
 
 ### Running Tests
 
-(Future: Add test suite)
+```bash
+python -m pytest
+```
+
+The test suite uses FastAPI's test client and mocks database access, so it does not require a running PostgreSQL instance.
+
+### Continuous Integration
+
+GitHub Actions runs syntax validation and the test suite on every push and pull request.
 
 ### Code Style
 
