@@ -231,9 +231,19 @@ python -m pytest
 
 The test suite uses FastAPI's test client and mocks database access, so it does not require a running PostgreSQL instance.
 
+To run the real Postgres-backed integration tests locally:
+
+```bash
+docker compose up -d db
+export TEST_DATABASE_URL="postgresql://products_user:products_pass@localhost:5432/products_db"
+python -m pytest tests/test_integration.py
+```
+
+The integration suite applies [db/schema.sql](db/schema.sql) to the test database, truncates tables between tests, and seeds a small fixture dataset.
+
 ### Continuous Integration
 
-GitHub Actions runs syntax validation and the test suite on every push and pull request.
+GitHub Actions runs syntax validation plus both unit and Postgres-backed integration tests on every push and pull request.
 
 ### Code Style
 
