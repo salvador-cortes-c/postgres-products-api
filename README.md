@@ -1,0 +1,242 @@
+# Postgres Products API
+
+A FastAPI service for read-only access to product pricing data from the New World Scraper. The API provides REST endpoints to query products, stores, categories, and historical price snapshots from a PostgreSQL database.
+
+## Features
+
+- **Product Search** - Query products by name with store filtering
+- **Price History** - Track price changes over time
+- **Category Browsing** - Browse all product categories
+- **Store Information** - List all stores
+- **Health Check** - Verify API and database connectivity
+
+## Prerequisites
+
+- Docker & Docker Compose (recommended for local development)
+- Python 3.12+ (if running without Docker)
+- PostgreSQL 14+ (if running locally)
+
+## Quick Start with Docker Compose
+
+The easiest way to get started is with Docker Compose, which automatically sets up PostgreSQL and the API:
+
+```bash
+# Start both the API and PostgreSQL database
+docker-compose up -d
+
+# Initialize the database schema (runs automatically on first start)
+# The schema.sql is applied via docker-entrypoint-initdb.d
+
+# Check API health
+curl http://localhost:8000/health
+
+# View API documentation
+open http://localhost:8000/docs
+```
+
+The API will be available at `http://localhost:8000` and the database at `localhost:5432`.
+
+## Local Development (Without Docker)
+
+### 1. Set Up PostgreSQL
+
+Option A: Local PostgreSQL installation
+```bash
+sudo apt-get install postgresql postgresql-contrib  # Ubuntu/Debian
+brew install postgresql                               # macOS
+```
+
+Option B: Use Supabase or Neon for cloud PostgreSQL
+```bash
+# Get your free database from:
+# https://supabase.com (PostgreSQL with 500MB free tier)
+# https://www.neon.tech (PostgreSQL with free tier)
+```
+
+### 2. Create Database and Apply Schema
+
+```bash
+# Local PostgreSQL
+createdb products_db
+psql products_db -f db/schema.sql
+
+# Or for cloud (e.g., Supabase):
+psql "postgresql://user:password@host:5432/database_name" -f db/schema.sql
+```
+
+### 3. Set Up Python Environment
+
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+pip install -r requirements.txt
+```
+
+### 4. Configure Database URL
+
+```bash
+# Local PostgreSQL (default)
+export DATABASE_URL="postgresql://localhost/products_db"
+
+# Or cloud PostgreSQL (Supabase/Neon)
+export DATABASE_URL="postgresql://user:password@host:5432/database_name"
+```
+
+### 5. Run the API
+
+```bash
+uvicorn main:app --reload
+```
+
+The API will be available at `http://localhost:8000`.
+
+## API Endpoints
+
+### Health Check
+
+```bash
+GET /health
+```
+
+Response:
+```json
+{"status": "ok"}
+```
+
+### Stores
+
+```bash
+GET /stores
+```
+
+Returns all stores sorted by name.
+
+### Categories
+
+```bash
+GET /categories
+```
+
+Returns all product categories sorted by name.
+
+### Products Search
+
+```bash
+GET /products?q=search_term&store=store_name&limit=100&offset=0
+```
+
+Query parameters:
+- `q` - Search products by name (partial match, case-insensitive)
+- `store` - Filter by store name
+- `limit` - Results per page (default: 100, max: 1000)
+- `offset` - Pagination offset (default: 0)
+
+Example:
+```bash
+# Search for all milk products
+curl "http://localhost:8000/products?q=milk&limit=20"
+
+# Search in specific store
+curl "http://localhost:8000/products?q=milk&store=New%20World%20Karori"
+```
+
+### Latest Price
+
+```bash
+GET /products/{product_key}/latest?store=store_name
+```
+
+Gets the most recent price snapshot for a product.
+
+Example:
+```bash
+curl "http://localhost:8000/products/milk-blue-robur-1l/latest"
+```
+
+### Price History
+
+```bash
+GET /products/{product_key}/history?store=store_name&limit=365
+```
+
+Gets historical price snapshots for a product.
+
+Query parameters:
+- `store` - Filter by store name (optional)
+- `limit` - Number of snapshots (default: 365, max: 5000)
+
+Example:
+```bash
+# Last 365 snapshots for a product across all stores
+curl "http://localhost:8000/products/milk-blue-robur-1l/history"
+
+# Last 30 snapshots from a specific store
+curl "http://localhost:8000/products/milk-blue-robur-1l/history?limit=30&store=New%20World%20Karori"
+```
+
+## Interactive API Docs
+
+Open your browser to:
+
+- **Swagger UI**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
+
+These provide interactive exploration of all endpoints.
+
+## Database Schema
+
+The database includes the following tables:
+
+- **products** - Product information (name, packaging, image)
+- **stores** - Store locations
+- **categories** - Product categories
+- **product_categories** - M:M relationship between products and categories
+- **price_snapshots** - Historical price data with timestamps
+- **crawl_runs** - Metadata about scraping runs
+
+See [db/schema.sql](db/schema.sql) for detailed schema definition.
+
+## Data Flow
+
+1. **Scraper** (from `python-playwright-scraper`) collects product data
+2. **Scraper** stores data in PostgreSQL via `--persist-db` flag
+3. **API** reads data from PostgreSQL for frontend consumption
+
+## Deployment
+
+### Cloud Deployment (e.g., Railway, Heroku, DigitalOcean)
+
+1. Create a free PostgreSQL database (Supabase, Neon, or cloud provider)
+2. Set `DATABASE_URL` environment variable
+3. Deploy the API (e.g., via Docker):
+
+```bash
+# Railway example
+railway up
+
+# Or Heroku
+git push heroku main
+```
+
+### Environment Variables
+
+- `DATABASE_URL` - PostgreSQL connection string (required)
+
+## Development
+
+### Running Tests
+
+(Future: Add test suite)
+
+### Code Style
+
+Uses Python 3.12+ features (e.g., `|` for type unions).
+
+## Support
+
+For issues related to the scraper or data ingestion, see the [python-playwright-scraper](../python-playwright-scraper) repository.
+
+## License
+
+See main project license.
