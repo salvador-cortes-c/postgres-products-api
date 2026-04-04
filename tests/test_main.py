@@ -17,12 +17,33 @@ def test_health_returns_ok(monkeypatch) -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_supermarkets_endpoint_returns_rows(monkeypatch) -> None:
+    monkeypatch.setattr(
+        main,
+        "_fetch_all",
+        lambda query, params=(): [
+            {"id": 1, "name": "New World", "code": "newworld", "created_at": "2026-04-02T00:00:00Z"}
+        ],
+    )
+
+    response = client.get("/supermarkets")
+
+    assert response.status_code == 200
+    assert response.json()[0]["code"] == "newworld"
+
+
 def test_stores_endpoint_returns_rows(monkeypatch) -> None:
     monkeypatch.setattr(
         main,
         "_fetch_all",
         lambda query, params=(): [
-            {"id": 1, "name": "New World Karori", "created_at": "2026-04-02T00:00:00Z"}
+            {
+                "id": 1,
+                "supermarket_id": 1,
+                "supermarket_name": "New World",
+                "name": "New World Karori",
+                "created_at": "2026-04-02T00:00:00Z",
+            }
         ],
     )
 
@@ -30,6 +51,7 @@ def test_stores_endpoint_returns_rows(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()[0]["name"] == "New World Karori"
+    assert response.json()[0]["supermarket_name"] == "New World"
 
 
 def test_stores_endpoint_requires_api_key_when_configured(monkeypatch) -> None:
@@ -80,13 +102,17 @@ def test_products_endpoint_forwards_filters(monkeypatch) -> None:
 
     monkeypatch.setattr(main, "_fetch_all", fake_fetch_all)
 
-    response = client.get("/products", params={"q": "milk", "store": "New World Karori", "limit": 20, "offset": 5})
+    response = client.get(
+        "/products",
+        params={"q": "milk", "store": "New World Karori", "supermarket": "New World", "limit": 20, "offset": 5},
+    )
 
     assert response.status_code == 200
     assert response.json()[0]["product_key"] == "milk-1l"
     assert "p.name ILIKE %s" in str(captured["query"])
     assert "s.name = %s" in str(captured["query"])
-    assert captured["params"] == ("%milk%", "New World Karori", 20, 5)
+    assert "sm.name = %s" in str(captured["query"])
+    assert captured["params"] == ("%milk%", "New World Karori", "New World", 20, 5)
 
 
 def test_latest_price_returns_404_when_missing(monkeypatch) -> None:
@@ -121,12 +147,16 @@ def test_price_history_endpoint_uses_store_filter(monkeypatch) -> None:
 
     monkeypatch.setattr(main, "_fetch_all", fake_fetch_all)
 
-    response = client.get("/products/milk-1l/history", params={"store": "New World Karori", "limit": 30})
+    response = client.get(
+        "/products/milk-1l/history",
+        params={"store": "New World Karori", "supermarket": "New World", "limit": 30},
+    )
 
     assert response.status_code == 200
     assert response.json()[0]["provider"] == "playwright"
     assert "s.name = %s" in str(captured["query"])
-    assert captured["params"] == ("milk-1l", "New World Karori", 30)
+    assert "sm.name = %s" in str(captured["query"])
+    assert captured["params"] == ("milk-1l", "New World Karori", "New World", 30)
 
 
 def test_category_products_endpoint_returns_category_and_products(monkeypatch) -> None:
@@ -163,7 +193,10 @@ def test_category_products_endpoint_returns_category_and_products(monkeypatch) -
     monkeypatch.setattr(main, "_fetch_one", fake_fetch_one)
     monkeypatch.setattr(main, "_fetch_all", fake_fetch_all)
 
-    response = client.get("/categories/1/products", params={"store": "New World Karori", "limit": 20, "offset": 5})
+    response = client.get(
+        "/categories/1/products",
+        params={"store": "New World Karori", "supermarket": "New World", "limit": 20, "offset": 5},
+    )
 
     assert response.status_code == 200
     payload = response.json()
@@ -172,7 +205,8 @@ def test_category_products_endpoint_returns_category_and_products(monkeypatch) -
     assert captured["category_params"] == (1,)
     assert "pc.category_id = %s" in str(captured["product_query"])
     assert "s.name = %s" in str(captured["product_query"])
-    assert captured["product_params"] == (1, "New World Karori", 20, 5)
+    assert "sm.name = %s" in str(captured["product_query"])
+    assert captured["product_params"] == (1, "New World Karori", "New World", 20, 5)
 
 
 def test_category_products_endpoint_returns_404_when_category_missing(monkeypatch) -> None:

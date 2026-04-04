@@ -12,8 +12,22 @@ def seed_database(database_url: str) -> None:
     with psycopg.connect(database_url, autocommit=True) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO stores (name) VALUES (%s), (%s)",
-                ("New World Karori", "New World Metro"),
+                """
+                INSERT INTO supermarkets (name, code)
+                VALUES (%s, %s), (%s, %s)
+                """,
+                ("New World", "newworld", "Woolworths", "woolworths"),
+            )
+            cur.execute("SELECT id, code FROM supermarkets ORDER BY id ASC")
+            supermarket_rows = {code: supermarket_id for supermarket_id, code in cur.fetchall()}
+            cur.execute(
+                "INSERT INTO stores (name, supermarket_id) VALUES (%s, %s), (%s, %s)",
+                (
+                    "New World Karori",
+                    supermarket_rows["newworld"],
+                    "New World Metro",
+                    supermarket_rows["newworld"],
+                ),
             )
             cur.execute(
                 """
@@ -78,6 +92,7 @@ def seed_database(database_url: str) -> None:
                 INSERT INTO price_snapshots (
                     product_key,
                     store_id,
+                    supermarket_id,
                     price_cents,
                     unit_price_text,
                     promo_price_cents,
@@ -87,13 +102,14 @@ def seed_database(database_url: str) -> None:
                     provider,
                     crawl_run_id
                 ) VALUES
-                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s),
-                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s),
-                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s),
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s),
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     "milk-1l",
                     store_rows["New World Karori"],
+                    supermarket_rows["newworld"],
                     379,
                     "$3.79/L",
                     None,
@@ -104,6 +120,7 @@ def seed_database(database_url: str) -> None:
                     crawl_run_id,
                     "milk-1l",
                     store_rows["New World Karori"],
+                    supermarket_rows["newworld"],
                     359,
                     "$3.59/L",
                     329,
@@ -114,6 +131,7 @@ def seed_database(database_url: str) -> None:
                     crawl_run_id,
                     "bread-white",
                     store_rows["New World Metro"],
+                    supermarket_rows["newworld"],
                     299,
                     "$4.27/kg",
                     None,
@@ -147,6 +165,7 @@ def test_products_returns_latest_snapshot_per_product(monkeypatch, integration_d
     payload = response.json()
     assert len(payload) == 1
     assert payload[0]["product_key"] == "milk-1l"
+    assert payload[0]["supermarket_name"] == "New World"
     assert payload[0]["price_cents"] == 379
 
 
@@ -182,11 +201,15 @@ def test_stores_and_categories_read_from_database(monkeypatch, integration_datab
     seed_database(integration_database_url)
     client = TestClient(main.app)
 
+    supermarkets_response = client.get("/supermarkets")
     stores_response = client.get("/stores")
     categories_response = client.get("/categories")
 
+    assert supermarkets_response.status_code == 200
+    assert [item["name"] for item in supermarkets_response.json()] == ["New World", "Woolworths"]
     assert stores_response.status_code == 200
     assert [item["name"] for item in stores_response.json()] == ["New World Karori", "New World Metro"]
+    assert stores_response.json()[0]["supermarket_name"] == "New World"
     assert categories_response.status_code == 200
     assert [item["name"] for item in categories_response.json()] == ["Bread", "Milk"]
 

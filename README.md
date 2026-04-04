@@ -1,15 +1,16 @@
 # Postgres Products API
 
-A FastAPI service for read-only access to product pricing data from the New World Scraper. The API provides REST endpoints to query products, stores, categories, and historical price snapshots from a PostgreSQL database.
+A FastAPI service for read-only access to product pricing data from the NZ supermarket scraper. The API provides REST endpoints to query supermarkets, stores, products, categories, and historical price snapshots from a PostgreSQL database.
 
 The API uses explicit Pydantic response models, so endpoint responses are typed, validated, and reflected accurately in the generated OpenAPI schema.
 
 ## Features
 
-- **Product Search** - Query products by name with store filtering
+- **Product Search** - Query products by name with store and supermarket filtering
 - **Category Browsing** - Fetch a category and its latest products in one call
 - **Price History** - Track price changes over time
-- **Store Information** - List all stores
+- **Supermarket Information** - List supported supermarket brands
+- **Store Information** - List all stores, optionally filtered by supermarket
 - **Health Check** - Verify API and database connectivity
 - **API Key Protection** - Optional header-based auth for public deployments
 
@@ -113,13 +114,21 @@ Response:
 {"status": "ok"}
 ```
 
+### Supermarkets
+
+```bash
+GET /supermarkets
+```
+
+Returns all supermarket brands sorted by name.
+
 ### Stores
 
 ```bash
-GET /stores
+GET /stores?supermarket=New%20World
 ```
 
-Returns all stores sorted by name.
+Returns all stores sorted by name, with optional supermarket filtering.
 
 ### Categories
 
@@ -132,7 +141,7 @@ Returns all product categories sorted by name.
 ### Category Products
 
 ```bash
-GET /categories/{category_id}/products?q=search_term&store=store_name&limit=100&offset=0
+GET /categories/{category_id}/products?q=search_term&store=store_name&supermarket=supermarket_name&limit=100&offset=0
 ```
 
 Returns the requested category plus the latest snapshot per product within that category.
@@ -141,17 +150,19 @@ Example:
 ```bash
 curl "http://localhost:8000/categories/1/products"
 curl "http://localhost:8000/categories/1/products?store=New%20World%20Karori"
+curl "http://localhost:8000/categories/1/products?supermarket=New%20World"
 ```
 
 ### Products Search
 
 ```bash
-GET /products?q=search_term&store=store_name&limit=100&offset=0
+GET /products?q=search_term&store=store_name&supermarket=supermarket_name&limit=100&offset=0
 ```
 
 Query parameters:
 - `q` - Search products by name (partial match, case-insensitive)
 - `store` - Filter by store name
+- `supermarket` - Filter by supermarket brand
 - `limit` - Results per page (default: 100, max: 1000)
 - `offset` - Pagination offset (default: 0)
 
@@ -162,12 +173,15 @@ curl "http://localhost:8000/products?q=milk&limit=20"
 
 # Search in specific store
 curl "http://localhost:8000/products?q=milk&store=New%20World%20Karori"
+
+# Search across a supermarket brand
+curl "http://localhost:8000/products?q=milk&supermarket=New%20World"
 ```
 
 ### Latest Price
 
 ```bash
-GET /products/{product_key}/latest?store=store_name
+GET /products/{product_key}/latest?store=store_name&supermarket=supermarket_name
 ```
 
 Gets the most recent price snapshot for a product.
@@ -180,13 +194,14 @@ curl "http://localhost:8000/products/milk-blue-robur-1l/latest"
 ### Price History
 
 ```bash
-GET /products/{product_key}/history?store=store_name&limit=365
+GET /products/{product_key}/history?store=store_name&supermarket=supermarket_name&limit=365
 ```
 
 Gets historical price snapshots for a product.
 
 Query parameters:
 - `store` - Filter by store name (optional)
+- `supermarket` - Filter by supermarket brand (optional)
 - `limit` - Number of snapshots (default: 365, max: 5000)
 
 Example:
@@ -212,10 +227,11 @@ These provide interactive exploration of all endpoints.
 The database includes the following tables:
 
 - **products** - Product information (name, packaging, image)
-- **stores** - Store locations
+- **supermarkets** - Normalized supermarket brands such as New World, Pak'nSave, and Woolworths
+- **stores** - Store locations linked to a supermarket brand
 - **categories** - Product categories
 - **product_categories** - M:M relationship between products and categories
-- **price_snapshots** - Historical price data with timestamps
+- **price_snapshots** - Historical price data with timestamps and supermarket/store references
 - **crawl_runs** - Metadata about scraping runs
 
 See [db/schema.sql](db/schema.sql) for detailed schema definition.

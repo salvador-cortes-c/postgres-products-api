@@ -16,8 +16,17 @@ class HealthResponse(BaseModel):
     status: str
 
 
+class SupermarketResponse(BaseModel):
+    id: int
+    name: str
+    code: str
+    created_at: datetime
+
+
 class StoreResponse(BaseModel):
     id: int
+    supermarket_id: int | None = None
+    supermarket_name: str | None = None
     name: str
     created_at: datetime
 
@@ -36,6 +45,7 @@ class ProductSummaryResponse(BaseModel):
     packaging_format: str
     image_url: str
     store_name: str | None = None
+    supermarket_name: str | None = None
     price_cents: int | None = None
     unit_price_text: str
     promo_price_cents: int | None = None
@@ -54,6 +64,7 @@ class ProductLatestPriceResponse(BaseModel):
     packaging_format: str
     image_url: str
     store_name: str | None = None
+    supermarket_name: str | None = None
     price_cents: int | None = None
     unit_price_text: str
     promo_price_cents: int | None = None
@@ -66,6 +77,7 @@ class PriceHistoryEntryResponse(BaseModel):
     id: int
     product_key: str
     store_name: str | None = None
+    supermarket_name: str | None = None
     price_cents: int | None = None
     unit_price_text: str
     promo_price_cents: int | None = None
@@ -116,7 +128,7 @@ def _fetch_one(query: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | Non
             return dict(row) if row else None
 
 
-app = FastAPI(title="New World Scraper API", version="0.1.0")
+app = FastAPI(title="NZ Supermarket Products API", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -133,9 +145,32 @@ def health() -> HealthResponse:
     return HealthResponse(status="ok")
 
 
+@app.get("/supermarkets", response_model=list[SupermarketResponse])
+def supermarkets(_: None = Depends(_require_api_key)) -> list[SupermarketResponse]:
+    rows = _fetch_all("SELECT id, name, code, created_at FROM supermarkets ORDER BY name ASC")
+    return [SupermarketResponse.model_validate(row) for row in rows]
+
+
 @app.get("/stores", response_model=list[StoreResponse])
-def stores(_: None = Depends(_require_api_key)) -> list[StoreResponse]:
-    rows = _fetch_all("SELECT id, name, created_at FROM stores ORDER BY name ASC")
+def stores(
+    supermarket: str | None = None,
+    _: None = Depends(_require_api_key),
+) -> list[StoreResponse]:
+    params: list[Any] = []
+    where_sql = ""
+    if supermarket:
+        where_sql = "WHERE sm.name = %s"
+        params.append(supermarket)
+    rows = _fetch_all(
+        f"""
+        SELECT s.id, s.supermarket_id, sm.name AS supermarket_name, s.name, s.created_at
+        FROM stores s
+        LEFT JOIN supermarkets sm ON sm.id = s.supermarket_id
+        {where_sql}
+        ORDER BY sm.name ASC NULLS LAST, s.name ASC
+        """,
+        tuple(params),
+    )
     return [StoreResponse.model_validate(row) for row in rows]
 
 
@@ -150,6 +185,7 @@ def category_products(
     category_id: int,
     q: str | None = None,
     store: str | None = None,
+    supermarket: str | None = None,
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     _: None = Depends(_require_api_key),
@@ -172,6 +208,10 @@ def category_products(
         filters.append("s.name = %s")
         params.append(store)
 
+    if supermarket:
+        filters.append("sm.name = %s")
+        params.append(supermarket)
+
     where_sql = f"WHERE {' AND '.join(filters)}"
     product_rows = _fetch_all(
         f"""
@@ -181,6 +221,7 @@ def category_products(
             p.packaging_format,
             p.image_url,
             s.name AS store_name,
+            sm.name AS supermarket_name,
             ps.price_cents,
             ps.unit_price_text,
             ps.promo_price_cents,
@@ -190,6 +231,7 @@ def category_products(
         JOIN products p ON p.product_key = pc.product_key
         JOIN price_snapshots ps ON ps.product_key = p.product_key
         LEFT JOIN stores s ON s.id = ps.store_id
+        LEFT JOIN supermarkets sm ON sm.id = COALESCE(ps.supermarket_id, s.supermarket_id)
         {where_sql}
         ORDER BY p.product_key, ps.scraped_at DESC
         LIMIT %s OFFSET %s;
@@ -206,6 +248,7 @@ def category_products(
 def products(
     q: str | None = None,
     store: str | None = None,
+    supermarket: str | None = None,
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     _: None = Depends(_require_api_key),
@@ -221,6 +264,10 @@ def products(
         filters.append("s.name = %s")
         params.append(store)
 
+    if supermarket:
+        filters.append("sm.name = %s")
+        params.append(supermarket)
+
     where_sql = f"WHERE {' AND '.join(filters)}" if filters else ""
 
     # DISTINCT ON returns latest snapshot per product (optionally per store filter).
@@ -231,6 +278,7 @@ def products(
             p.packaging_format,
             p.image_url,
             s.name AS store_name,
+            sm.name AS supermarket_name,
             ps.price_cents,
             ps.unit_price_text,
             ps.promo_price_cents,
@@ -239,6 +287,7 @@ def products(
         FROM products p
         JOIN price_snapshots ps ON ps.product_key = p.product_key
         LEFT JOIN stores s ON s.id = ps.store_id
+        LEFT JOIN supermarkets sm ON sm.id = COALESCE(ps.supermarket_id, s.supermarket_id)
         {where_sql}
         ORDER BY p.product_key, ps.scraped_at DESC
         LIMIT %s OFFSET %s;
@@ -252,56 +301,43 @@ def products(
 def latest_price(
     product_key: str,
     store: str | None = None,
+    supermarket: str | None = None,
     _: None = Depends(_require_api_key),
 ) -> ProductLatestPriceResponse:
+    filters = ["p.product_key = %s"]
+    params: list[Any] = [product_key]
     if store:
-        row = _fetch_one(
-            """
-            SELECT
-                p.product_key,
-                p.name,
-                p.packaging_format,
-                p.image_url,
-                s.name AS store_name,
-                ps.price_cents,
-                ps.unit_price_text,
-                ps.promo_price_cents,
-                ps.promo_unit_price_text,
-                ps.source_url,
-                ps.scraped_at
-            FROM products p
-            JOIN price_snapshots ps ON ps.product_key = p.product_key
-            LEFT JOIN stores s ON s.id = ps.store_id
-            WHERE p.product_key = %s AND s.name = %s
-            ORDER BY ps.scraped_at DESC
-            LIMIT 1;
-            """,
-            (product_key, store),
-        )
-    else:
-        row = _fetch_one(
-            """
-            SELECT
-                p.product_key,
-                p.name,
-                p.packaging_format,
-                p.image_url,
-                s.name AS store_name,
-                ps.price_cents,
-                ps.unit_price_text,
-                ps.promo_price_cents,
-                ps.promo_unit_price_text,
-                ps.source_url,
-                ps.scraped_at
-            FROM products p
-            JOIN price_snapshots ps ON ps.product_key = p.product_key
-            LEFT JOIN stores s ON s.id = ps.store_id
-            WHERE p.product_key = %s
-            ORDER BY ps.scraped_at DESC
-            LIMIT 1;
-            """,
-            (product_key,),
-        )
+        filters.append("s.name = %s")
+        params.append(store)
+    if supermarket:
+        filters.append("sm.name = %s")
+        params.append(supermarket)
+
+    row = _fetch_one(
+        f"""
+        SELECT
+            p.product_key,
+            p.name,
+            p.packaging_format,
+            p.image_url,
+            s.name AS store_name,
+            sm.name AS supermarket_name,
+            ps.price_cents,
+            ps.unit_price_text,
+            ps.promo_price_cents,
+            ps.promo_unit_price_text,
+            ps.source_url,
+            ps.scraped_at
+        FROM products p
+        JOIN price_snapshots ps ON ps.product_key = p.product_key
+        LEFT JOIN stores s ON s.id = ps.store_id
+        LEFT JOIN supermarkets sm ON sm.id = COALESCE(ps.supermarket_id, s.supermarket_id)
+        WHERE {' AND '.join(filters)}
+        ORDER BY ps.scraped_at DESC
+        LIMIT 1;
+        """,
+        tuple(params),
+    )
 
     if row is None:
         raise HTTPException(status_code=404, detail="Product snapshot not found")
@@ -312,39 +348,26 @@ def latest_price(
 def price_history(
     product_key: str,
     store: str | None = None,
+    supermarket: str | None = None,
     limit: int = Query(default=365, ge=1, le=5000),
     _: None = Depends(_require_api_key),
 ) -> list[PriceHistoryEntryResponse]:
+    filters = ["ps.product_key = %s"]
+    params: list[Any] = [product_key]
     if store:
-        rows = _fetch_all(
-            """
-            SELECT
-                ps.id,
-                ps.product_key,
-                s.name AS store_name,
-                ps.price_cents,
-                ps.unit_price_text,
-                ps.promo_price_cents,
-                ps.promo_unit_price_text,
-                ps.source_url,
-                ps.scraped_at,
-                ps.provider
-            FROM price_snapshots ps
-            LEFT JOIN stores s ON s.id = ps.store_id
-            WHERE ps.product_key = %s AND s.name = %s
-            ORDER BY ps.scraped_at DESC
-            LIMIT %s;
-            """,
-            (product_key, store, limit),
-        )
-        return [PriceHistoryEntryResponse.model_validate(row) for row in rows]
+        filters.append("s.name = %s")
+        params.append(store)
+    if supermarket:
+        filters.append("sm.name = %s")
+        params.append(supermarket)
 
     rows = _fetch_all(
-        """
+        f"""
         SELECT
             ps.id,
             ps.product_key,
             s.name AS store_name,
+            sm.name AS supermarket_name,
             ps.price_cents,
             ps.unit_price_text,
             ps.promo_price_cents,
@@ -354,10 +377,11 @@ def price_history(
             ps.provider
         FROM price_snapshots ps
         LEFT JOIN stores s ON s.id = ps.store_id
-        WHERE ps.product_key = %s
+        LEFT JOIN supermarkets sm ON sm.id = COALESCE(ps.supermarket_id, s.supermarket_id)
+        WHERE {' AND '.join(filters)}
         ORDER BY ps.scraped_at DESC
         LIMIT %s;
         """,
-        (product_key, limit),
+        tuple([*params, limit]),
     )
     return [PriceHistoryEntryResponse.model_validate(row) for row in rows]

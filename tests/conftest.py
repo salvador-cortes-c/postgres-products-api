@@ -25,7 +25,12 @@ def integration_database_url() -> str:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def ensure_test_schema(integration_database_url: str) -> Iterator[None]:
+def ensure_test_schema() -> Iterator[None]:
+    integration_database_url = os.getenv("TEST_DATABASE_URL")
+    if not integration_database_url:
+        yield
+        return
+
     schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
     with psycopg.connect(integration_database_url, autocommit=True) as conn:
         with conn.cursor() as cur:
@@ -34,7 +39,12 @@ def ensure_test_schema(integration_database_url: str) -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
-def reset_test_database(integration_database_url: str) -> Iterator[None]:
+def reset_test_database() -> Iterator[None]:
+    integration_database_url = os.getenv("TEST_DATABASE_URL")
+    if not integration_database_url:
+        yield
+        return
+
     with psycopg.connect(integration_database_url, autocommit=True) as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -45,6 +55,7 @@ def reset_test_database(integration_database_url: str) -> Iterator[None]:
                     crawl_runs,
                     categories,
                     stores,
+                    supermarkets,
                     products
                 RESTART IDENTITY CASCADE;
                 """
