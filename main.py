@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime
 import os
+import secrets
 from typing import Any
 
 import psycopg
-from fastapi import Depends, FastAPI, HTTPException, Query, Security, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Security, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from psycopg.rows import dict_row
@@ -94,6 +96,51 @@ def _database_url() -> str:
     return value
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _csv_env(name: str) -> list[str]:
+    value = os.getenv(name, "")
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _is_production() -> bool:
+    app_env = os.getenv("APP_ENV")
+    if app_env and app_env.strip():
+        return app_env.strip().lower() in {"prod", "production"}
+
+    hosted_markers = (
+        "RAILWAY_ENVIRONMENT_NAME",
+        "RAILWAY_PROJECT_ID",
+        "RAILWAY_SERVICE_ID",
+        "VERCEL",
+        "K_SERVICE",
+    )
+    return any(os.getenv(name) for name in hosted_markers)
+
+
+def _docs_enabled() -> bool:
+    return _env_flag("ENABLE_DOCS", default=not _is_production())
+
+
+def _auth_required() -> bool:
+    return _env_flag("REQUIRE_API_KEY", default=_is_production())
+
+
+def _allowed_origins() -> list[str]:
+    configured = _csv_env("ALLOWED_ORIGINS")
+    if configured:
+        return configured
+    return [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+
+
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
@@ -103,9 +150,15 @@ def _api_key() -> str | None:
 
 def _require_api_key(api_key: str | None = Security(api_key_header)) -> None:
     expected_api_key = _api_key()
-    if expected_api_key is None:
+    if not expected_api_key:
+        if _auth_required():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="API authentication is not configured",
+            )
         return
-    if api_key != expected_api_key:
+    provided_api_key = api_key or ""
+    if not secrets.compare_digest(provided_api_key, expected_api_key):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing API key",
@@ -128,15 +181,50 @@ def _fetch_one(query: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | Non
             return dict(row) if row else None
 
 
-app = FastAPI(title="NZ Supermarket Products API", version="0.2.0")
+docs_enabled = _docs_enabled()
+
+app = FastAPI(
+    title="NZ Supermarket Products API",
+    version="0.3.0",
+    docs_url="/docs" if docs_enabled else None,
+    redoc_url="/redoc" if docs_enabled else None,
+    openapi_url="/openapi.json" if docs_enabled else None,
+)
+
+allowed_hosts = _csv_env("ALLOWED_HOSTS")
+if allowed_hosts:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_allowed_origins(),
+    allow_origin_regex=os.getenv("ALLOWED_ORIGIN_REGEX") or None,
+    allow_credentials=False,
+    allow_methods=["GET", "OPTIONS"],
+    allow_headers=["Accept", "Content-Type", "X-API-Key"],
+    max_age=600,
 )
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+
+    if request.url.path not in {"/docs", "/redoc", "/openapi.json"}:
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+        )
+
+    forwarded_proto = request.headers.get("x-forwarded-proto", request.url.scheme).lower()
+    if forwarded_proto == "https":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
+
+    return response
 
 
 @app.get("/health", response_model=HealthResponse)

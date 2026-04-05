@@ -13,6 +13,7 @@ The API uses explicit Pydantic response models, so endpoint responses are typed,
 - **Store Information** - List all stores, optionally filtered by supermarket
 - **Health Check** - Verify API and database connectivity
 - **API Key Protection** - Optional header-based auth for public deployments
+- **Deployment Hardening** - Safer CORS defaults, trusted host filtering, hidden docs in production, and response security headers
 
 ## Prerequisites
 
@@ -259,7 +260,22 @@ docker run --rm -p 8000:8000 -e DATABASE_URL="$DATABASE_URL" postgres-products-a
 ### Environment Variables
 
 - `DATABASE_URL` - PostgreSQL connection string (required)
-- `API_KEY` - optional shared secret for `X-API-Key` protection on all read endpoints except `/health`
+- `API_KEY` - shared secret for `X-API-Key` protection on all read endpoints except `/health` (**required in production**)
+- `APP_ENV` - set to `production` to disable `/docs`, `/redoc`, and `/openapi.json` by default
+- `REQUIRE_API_KEY` - optional override to force auth outside production too; defaults to `true` in production
+- `ALLOWED_ORIGINS` - comma-separated browser origins allowed to call the API (defaults to local Next.js dev origins only)
+- `ALLOWED_ORIGIN_REGEX` - optional regex for preview URLs if you need flexible origin matching
+- `ALLOWED_HOSTS` - comma-separated hostnames to accept, used to block unexpected `Host` headers
+- `ENABLE_DOCS` - set to `true` only when you intentionally want docs exposed in production
+
+Recommended production values:
+
+```bash
+export APP_ENV="production"
+export API_KEY="replace-with-a-long-random-secret"
+export ALLOWED_ORIGINS="https://your-frontend.example.com"
+export ALLOWED_HOSTS="your-api.example.com"
+```
 
 ### Authentication
 
@@ -269,7 +285,7 @@ When `API_KEY` is set, requests to `/stores`, `/categories`, `/categories/{categ
 curl -H "X-API-Key: $API_KEY" "http://localhost:8000/products?limit=5"
 ```
 
-If `API_KEY` is not set, the API stays open for local development.
+If `API_KEY` is not set, the API stays open only in local development. In production it now **fails closed** and returns `503` until the shared secret is configured.
 
 ## Development
 

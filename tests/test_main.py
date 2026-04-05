@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+
 from fastapi.testclient import TestClient
 
 import main
@@ -62,6 +64,36 @@ def test_stores_endpoint_requires_api_key_when_configured(monkeypatch) -> None:
     assert response.status_code == 401
     assert response.json() == {"detail": "Invalid or missing API key"}
 
+
+def test_production_fails_closed_without_api_key(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.delenv("API_KEY", raising=False)
+    reloaded_main = importlib.reload(main)
+    production_client = TestClient(reloaded_main.app)
+
+    response = production_client.get("/stores")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "API authentication is not configured"}
+
+    monkeypatch.delenv("APP_ENV", raising=False)
+    importlib.reload(main)
+
+
+def test_railway_environment_defaults_to_protected_mode(monkeypatch) -> None:
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("API_KEY", raising=False)
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT_NAME", "production")
+    reloaded_main = importlib.reload(main)
+    production_client = TestClient(reloaded_main.app)
+
+    response = production_client.get("/stores")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "API authentication is not configured"}
+
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT_NAME", raising=False)
+    importlib.reload(main)
 
 def test_stores_endpoint_accepts_api_key_when_configured(monkeypatch) -> None:
     monkeypatch.setenv("API_KEY", "secret-key")
@@ -222,3 +254,41 @@ def test_products_endpoint_rejects_invalid_limit() -> None:
     response = client.get("/products", params={"limit": 0})
 
     assert response.status_code == 422
+
+
+def test_health_includes_security_headers(monkeypatch) -> None:
+    monkeypatch.setattr(main, "_database_url", lambda: "postgresql://example")
+
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["referrer-policy"] == "no-referrer"
+
+
+def test_docs_are_disabled_in_production_by_default(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    reloaded_main = importlib.reload(main)
+    production_client = TestClient(reloaded_main.app)
+
+    response = production_client.get("/docs")
+
+    assert response.status_code == 404
+
+    monkeypatch.delenv("APP_ENV", raising=False)
+    importlib.reload(main)
+
+
+def test_trusted_hosts_reject_unknown_host_when_configured(monkeypatch) -> None:
+    monkeypatch.setenv("ALLOWED_HOSTS", "api.example.com")
+    reloaded_main = importlib.reload(main)
+    locked_client = TestClient(reloaded_main.app)
+    monkeypatch.setattr(reloaded_main, "_database_url", lambda: "postgresql://example")
+
+    response = locked_client.get("/health", headers={"host": "evil.example.com"})
+
+    assert response.status_code == 400
+
+    monkeypatch.delenv("ALLOWED_HOSTS", raising=False)
+    importlib.reload(main)

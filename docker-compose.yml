@@ -22,6 +22,8 @@ services:
     container_name: postgres-products-api
     environment:
       DATABASE_URL: postgresql://products_user:products_pass@db:5432/products_db
+      APP_ENV: development
+      ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
     ports:
       - "8000:8000"
     depends_on:
